@@ -108,3 +108,82 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# C#/.NET project ignores for src/serializer
+src/serializer/**/bin/
+src/serializer/**/obj/
+src/serializer/**/.vs/
+src/serializer/**/*.user
+src/serializer/**/*.suo
+src/serializer/**/*.userosscache
+src/serializer/**/*.sln.docstates
+src/serializer/**/*.cache
+src/serializer/**/*.pdb
+src/serializer/**/*.mdb
+src/serializer/**/*.log
+src/serializer/**/*.dbmdl
+src/serializer/**/*.dbmdl
+src/serializer/**/*.sdf
+src/serializer/**/*.vssscc
+src/serializer/**/*.vsscc
+src/serializer/**/*.ncb
+src/serializer/**/*.scc
+src/serializer/**/*.psess
+src/serializer/**/*.vsp
+src/serializer/**/*.vspscc
+src/serializer/**/*.pidb
+src/serializer/**/*.svclog
+src/serializer/**/*.suo
+src/serializer/**/*.userprefs
+src/serializer/**/*.userosscache
+src/serializer/**/*.sln.docstates
+src/serializer/**/*.suo
+src/serializer/**/*.user
+src/serializer/**/*.userosscache
+src/serializer/**/*.sln.docstates
+
+# Common ignores for machine learning/data science projects
+# Data files
+*.csv
+*.tsv
+*.h5
+*.hdf5
+*.npz
+*.npy
+*.parquet
+*.feather
+*.pkl
+*.pickle
+*.joblib
+*.db
+*.sqlite
+*.xls
+*.xlsx
+*.sav
+*.rds
+*.mat
+*.arff
+*.model
+*.ckpt
+*.pth
+*.pt
+*.onnx
+*.pb
+*.tflite
+*.mlmodel
+*.weights
+*.log
+*.tensorboard/
+data/**/test_output.json
+
+# Experiment outputs
+runs/
+outputs/
+results/
+logs/
+checkpoints/
+models/
+# Jupyter/IPython
+.ipynb_checkpoints/
+# VSCode settings (if not already ignored)
+.vscode/
