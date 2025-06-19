@@ -10,15 +10,21 @@ namespace MajdataEdit
     {
         static void Main(string[] args)
         {
-            if (args.Length == 0)
+            if (args.Length < 2)
             {
-                Console.Error.WriteLine("Usage: SimaiSerializerFromMajdataEdit.exe <file_or_directory_path>");
-                Console.Error.WriteLine("Processes a single maidata.txt file or all maidata.txt files in a directory and outputs JSON to stdout.");
+                Console.Error.WriteLine("Usage: SimaiSerializerFromMajdataEdit.exe <file_or_directory_path> <output_directory>");
+                Console.Error.WriteLine("Processes a single maidata.txt file or all maidata.txt files in a directory and outputs individual JSON files for each difficulty level.");
                 Environment.Exit(1);
                 return;
             }
-
             string inputPath = args[0];
+            string outputPath = args[1];
+
+            if (!Directory.Exists(outputPath))
+            {
+                Directory.CreateDirectory(outputPath);
+            }
+
             var filesToProcess = new List<string>();
 
             if (File.Exists(inputPath))
@@ -41,43 +47,40 @@ namespace MajdataEdit
                 Environment.Exit(1);
                 return;
             }
-
             if (filesToProcess.Count == 0)
             {
                 Console.Error.WriteLine($"No maidata.txt files found to process in path: {inputPath}");
                 return;
             }
 
-            var allCharts = new List<object>();
             foreach (var file in filesToProcess)
             {
-                var chartsFromFile = ProcessFile(file);
-                if (chartsFromFile != null)
-                {
-                    allCharts.AddRange(chartsFromFile);
-                }
+                ProcessFile(file, outputPath);
             }
-
-            var options = new JsonSerializerOptions 
-            { 
-                WriteIndented = true, 
-                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping 
-            };
-            string jsonString = JsonSerializer.Serialize(allCharts, options);
-            Console.WriteLine(jsonString);
         }
-
-        static List<object> ProcessFile(string filePath)
+        static void ProcessFile(string filePath, string outputPath)
         {
             ClearFumens();
             if (!SimaiProcess.ReadData(filePath))
             {
                 Console.Error.WriteLine($"Warning: Failed to read or process file, skipping: {filePath}");
-                return null;
+                return;
             }
 
-            string songId = Path.GetFileName(Path.GetDirectoryName(filePath));
-            var chartsForFile = new List<object>();
+            string folderName = Path.GetFileName(Path.GetDirectoryName(filePath));
+            string songId = ExtractNumericId(folderName);
+
+            if (songId == null)
+            {
+                Console.Error.WriteLine($"Error: Cannot extract numeric ID from folder name '{folderName}', skipping: {filePath}");
+                return;
+            }
+
+            var options = new JsonSerializerOptions
+            {
+                WriteIndented = true,
+                Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+            };
 
             for (int level_index = 0; level_index < SimaiProcess.fumens.Length; level_index++)
             {
@@ -130,10 +133,33 @@ namespace MajdataEdit
                         level_index = level_index,
                         notes = noteDataForLevel
                     };
-                    chartsForFile.Add(chartOutput);
+
+                    string fileName = $"{folderName}_{level_index}.json";
+                    string outputFilePath = Path.Combine(outputPath, fileName);
+                    string jsonString = JsonSerializer.Serialize(chartOutput, options);
+                    File.WriteAllText(outputFilePath, jsonString);
+                    Console.WriteLine($"Generated: {outputFilePath}");
                 }
             }
-            return chartsForFile;
+        }
+
+        static string ExtractNumericId(string folderName)
+        {
+            if (string.IsNullOrEmpty(folderName))
+            {
+                return null;
+            }
+
+            int underscoreIndex = folderName.IndexOf('_');
+            if (underscoreIndex > 0)
+            {
+                string numericPart = folderName.Substring(0, underscoreIndex);
+                if (int.TryParse(numericPart, out _))
+                {
+                    return numericPart;
+                }
+            }
+            return null;
         }
 
         static void ClearFumens()
