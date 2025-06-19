@@ -187,3 +187,5 @@ models/
 .ipynb_checkpoints/
 # VSCode settings (if not already ignored)
 .vscode/
+# Github files
+.github/
