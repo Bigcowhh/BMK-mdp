@@ -95,6 +95,7 @@ namespace MajdataEdit
                     }
 
                     var noteDataForLevel = new List<object>();
+                    int totalNoteCount = 0;
                     foreach (var noteGroup in SimaiProcess.notelist)
                     {
                         var noteGroupData = new
@@ -125,12 +126,14 @@ namespace MajdataEdit
                             noteGroupData.Notes.Add(noteProperties);
                         }
                         noteDataForLevel.Add(noteGroupData);
+                        totalNoteCount += noteGroup.noteList.Count;
                     }
 
                     var chartOutput = new
                     {
                         song_id = songId,
                         level_index = level_index,
+                        total_notes = totalNoteCount,
                         notes = noteDataForLevel
                     };
 
