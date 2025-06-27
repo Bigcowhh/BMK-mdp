@@ -4,13 +4,16 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+import matplotlib.pyplot as plt
 from src.config import *
 from src.model import SimpleLSTM
 from src.dataset import MaichartDataset, collate_fn
 
-def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.001):
+def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.001, 
+                experiment_name=None, log_dir=None):
     """
-    改进的模型训练函数，包含验证集监控、早停机制和学习率调度。
+    改进的模型训练函数，包含验证集监控、早停机制、学习率调度和 TensorBoard 日志记录。
     
     Args:
         model (nn.Module): 要训练的 PyTorch 模型
@@ -18,6 +21,8 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
         val_loader (DataLoader): 验证数据加载器，格式同训练数据加载器
         num_epochs (int, optional): 最大训练轮数。默认为 50
         learning_rate (float, optional): 初始学习率。默认为 0.001
+        experiment_name (str, optional): 实验名称，用于 TensorBoard 日志
+        log_dir (str, optional): TensorBoard 日志目录
     
     Returns:
         tuple[list, list]: 包含两个列表的元组
@@ -30,14 +35,21 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
         - Scheduler: ReduceLROnPlateau，验证损失停止改善时降低学习率
         - Early Stopping: 连续 10 个 epoch 验证损失无改善时停止训练
         - Gradient Clipping: 最大梯度范数限制为 1.0，防止梯度爆炸
-    
-    Model Checkpointing:
+        - TensorBoard Logging: 记录损失、学习率、模型参数分布等
+      Model Checkpointing:
         - 自动保存验证损失最低的模型权重到 'best_model.pth'
         - 训练结束后可通过 model.load_state_dict(torch.load('best_model.pth')) 加载最佳模型
     """
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate, weight_decay=1e-5)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=5, factor=0.5)
+    
+    # 初始化 TensorBoard Writer
+    writer = None
+    if log_dir and experiment_name:
+        tb_log_dir = os.path.join(log_dir, experiment_name)
+        writer = SummaryWriter(tb_log_dir)
+        print(f"TensorBoard 日志目录: {tb_log_dir}")
     
     best_val_loss = float('inf')
     patience_counter = 0
@@ -74,9 +86,7 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
             optimizer.step()
             batch_time = time.time() - batch_start_time
             train_batch_times.append(batch_time)
-            train_loss += loss.item()
-
-            # 每10个batch输出一次进度（可调整频率）
+            train_loss += loss.item()            # 每10个batch输出一次进度（可调整频率）
             if (batch_idx + 1) % 10 == 0 or (batch_idx + 1) == len(train_loader):
                 avg_batch_time = np.mean(train_batch_times[-10:])  # 最近10个batch的平均时间
                 print(f"  Batch [{batch_idx+1:4d}/{len(train_loader):4d}] | "
@@ -87,6 +97,17 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
         
         avg_train_loss = train_loss / len(train_loader)
         train_losses.append(avg_train_loss)
+        
+        # 记录训练损失到 TensorBoard
+        if writer:
+            writer.add_scalar('Loss/Train', avg_train_loss, epoch)
+            writer.add_scalar('Learning_Rate', optimizer.param_groups[0]['lr'], epoch)
+            
+            # 记录模型参数分布
+            for name, param in model.named_parameters():
+                if param.grad is not None:                    
+                    writer.add_histogram(f'Parameters/{name}', param, epoch)
+                    writer.add_histogram(f'Gradients/{name}', param.grad, epoch)
         
         # === 验证阶段 ===
         print(f"\nEpoch [{epoch+1}/{num_epochs}] - 验证阶段")
@@ -103,6 +124,10 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
         
         avg_val_loss = val_loss / len(val_loader)
         val_losses.append(avg_val_loss)
+        
+        # 记录验证损失到 TensorBoard
+        if writer:
+            writer.add_scalar('Loss/Validation', avg_val_loss, epoch)
         
         # 学习率调度
         scheduler.step(avg_val_loss)
@@ -126,30 +151,34 @@ def train_model(model, train_loader, val_loader, num_epochs=50, learning_rate=0.
         avg_epoch_time = elapsed_time / (epoch + 1)
         remaining_epochs = num_epochs - (epoch + 1)
         estimated_remaining_time = avg_epoch_time * remaining_epochs
-        
         print(f"  已用时间: {elapsed_time/60:.1f}分钟 | 预计剩余: {estimated_remaining_time/60:.1f}分钟")
         print(f"{'='*60}")
         
         if patience_counter >= early_stop_patience:
             print(f"Early stopping at epoch {epoch+1}")
             break
-        
     
     total_training_time = time.time() - total_start_time
     print(f"\n🎉 训练完成!")
     print(f"总训练时间: {total_training_time/60:.1f} 分钟")
     print(f"最佳验证损失: {best_val_loss:.6f}")
     
+    # 关闭 TensorBoard Writer
+    if writer:
+        writer.close()
+        print(f"TensorBoard 日志已保存到: {writer.log_dir}")
+    
     return train_losses, val_losses
 
-def evaluate_model(model, data_loader):
-    """全面评估模型性能"""
+def evaluate_model(model, data_loader, writer=None, epoch=None, phase=""):
+    """全面评估模型性能，支持 TensorBoard 记录"""
     model.eval()
     predictions = []
     true_values = []
     
     with torch.no_grad():
         for sequences, labels in data_loader:
+            sequences, labels = sequences.to(DEVICE), labels.to(DEVICE)
             outputs = model(sequences)
             predictions.extend(outputs.cpu().numpy().flatten())
             true_values.extend(labels.cpu().numpy().flatten())
@@ -167,13 +196,37 @@ def evaluate_model(model, data_loader):
     accuracy_02 = np.mean(np.abs(predictions - true_values) <= 0.2)
     accuracy_05 = np.mean(np.abs(predictions - true_values) <= 0.5)
     
-    print(f"评估结果:")
+    print(f"评估结果 {phase}:")
     print(f"  MSE: {mse:.4f}")
     print(f"  MAE: {mae:.4f}")
     print(f"  R²: {r2:.4f}")
     print(f"  ±0.1准确率: {accuracy_01:.3f}")
     print(f"  ±0.2准确率: {accuracy_02:.3f}")
     print(f"  ±0.5准确率: {accuracy_05:.3f}")
+    
+    # 记录到 TensorBoard
+    if writer and epoch is not None:
+        prefix = f"Metrics/{phase}" if phase else "Metrics"
+        writer.add_scalar(f'{prefix}/MSE', mse, epoch)
+        writer.add_scalar(f'{prefix}/MAE', mae, epoch)
+        writer.add_scalar(f'{prefix}/R2', r2, epoch)
+        writer.add_scalar(f'{prefix}/Accuracy_0.1', accuracy_01, epoch)
+        writer.add_scalar(f'{prefix}/Accuracy_0.2', accuracy_02, epoch)
+        writer.add_scalar(f'{prefix}/Accuracy_0.5', accuracy_05, epoch)
+        
+        # 记录预测分布
+        writer.add_histogram(f'{prefix}/Predictions', predictions, epoch)
+        writer.add_histogram(f'{prefix}/True_Values', true_values, epoch)
+        writer.add_histogram(f'{prefix}/Prediction_Errors', predictions - true_values, epoch)
+        
+        # 创建并记录散点图
+        if len(predictions) <= 1000:  # 避免图像过于密集
+            scatter_fig = create_prediction_scatter_plot(
+                predictions, true_values, 
+                title=f"Predictions vs True Values {phase}"
+            )
+            writer.add_figure(f'{prefix}/Prediction_Scatter', scatter_fig, epoch)
+            plt.close(scatter_fig)  # 释放内存
     
     return {
         'mse': mse, 'mae': mae, 'r2': r2,
@@ -224,6 +277,7 @@ def save_experiment_log(model, train_losses, val_losses, train_results, test_res
     return log_file
 
 def train_complete_pipeline():
+    """完整的训练流程，包含 TensorBoard 日志记录"""
 
     # 实验配置
     config = {
@@ -240,40 +294,30 @@ def train_complete_pipeline():
     print(f"实验配置: {config}")
     print("="*80)
 
+    # 设置 TensorBoard 日志
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    experiment_name = f"experiment_{timestamp}"
+    tb_log_dir = os.path.join(BASE_DIR, "tensorboard_logs")
+    os.makedirs(tb_log_dir, exist_ok=True)
+    print(f"TensorBoard 实验名称: {experiment_name}")
+
     # 创建数据集
-    print("创建数据集...")
+    print("\n创建数据集...")
     dataset_start_time = time.time()
     train_dataset = MaichartDataset(SERIALIZED_DIR, TRAIN_DATA_PATH)
     test_dataset = MaichartDataset(SERIALIZED_DIR, TEST_DATA_PATH)
     dataset_time = time.time() - dataset_start_time
     print(f"数据集创建完成 ({dataset_time:.3f}s)")
-    print(f"训练集大小: {len(train_dataset)}, 测试集大小: {len(test_dataset)}")
-
-    # 创建数据加载器
+    print(f"训练集大小: {len(train_dataset)}, 测试集大小: {len(test_dataset)}")    # 创建数据加载器
     print("\n创建数据加载器...")
     loader_start_time = time.time()
 
-    # 使用分桶采样器创建训练数据加载器
-    # 注意：使用 batch_sampler 时，DataLoader的 batch_size, shuffle, sampler, drop_last 参数必须为默认值
-    # train_sampler = LevelIndexBucketSampler(
-    #     train_dataset,
-    #     batch_size=config['batch_size'],
-    #     shuffle=True,
-    #     drop_last=True # 在训练时丢弃不完整的batch通常是好的实践
-    # )
-    # train_loader = DataLoader(
-    #     train_dataset,
-    #     batch_sampler=train_sampler,
-    #     collate_fn=collate_fn,
-    #     num_workers=0   
-    # )
-
     train_loader = DataLoader(
-    train_dataset,
-    batch_size=config['batch_size'],
-    shuffle=True,
-    collate_fn=collate_fn,
-    num_workers=0
+        train_dataset,
+        batch_size=config['batch_size'],
+        shuffle=True,
+        collate_fn=collate_fn,
+        num_workers=0
     )
 
     # 测试加载器不需要分桶或打乱
@@ -286,9 +330,7 @@ def train_complete_pipeline():
     )
     loader_time = time.time() - loader_start_time
     print(f"数据加载器创建完成 ({loader_time:.3f}s)")
-    print(f"测试批次数: {len(test_loader)}")
-
-    # 创建模型
+    print(f"训练批次数: {len(train_loader)}, 测试批次数: {len(test_loader)}")    # 创建模型
     print("\n创建模型...")
     model_start_time = time.time()
     model = SimpleLSTM(
@@ -303,11 +345,26 @@ def train_complete_pipeline():
     print(f"模型参数数量: {param_count:,}")
     print(f"模型设备: {next(model.parameters()).device}")
 
+    # 创建 TensorBoard Writer 并记录模型结构
+    writer = SummaryWriter(os.path.join(tb_log_dir, experiment_name))
+    
+    # 记录模型结构图（使用一个样本数据）
+    try:
+        sample_input, _ = next(iter(train_loader))
+        sample_input = sample_input.to(DEVICE)
+        writer.add_graph(model, sample_input)
+        print("模型结构图已记录到 TensorBoard")
+    except Exception as e:
+        print(f"记录模型结构图失败: {e}")
+
     # 训练模型
+    print("\n开始训练...")
     train_losses, val_losses = train_model(
         model, train_loader, test_loader, 
         num_epochs=config['num_epochs'], 
-        learning_rate=config['learning_rate']
+        learning_rate=config['learning_rate'],
+        experiment_name=experiment_name,
+        log_dir=tb_log_dir
     )
     
     # 加载最佳模型并评估
@@ -322,3 +379,24 @@ def train_complete_pipeline():
 
 
     return model, train_losses, val_losses, train_results, test_results
+
+def create_prediction_scatter_plot(predictions, true_values, title="Predictions vs True Values"):
+    """创建预测值与真实值的散点图"""
+    plt.figure(figsize=(8, 8))
+    plt.scatter(true_values, predictions, alpha=0.6, s=20)
+    
+    # 添加完美预测线 (y=x)
+    min_val = min(min(predictions), min(true_values))
+    max_val = max(max(predictions), max(true_values))
+    plt.plot([min_val, max_val], [min_val, max_val], 'r--', linewidth=2, label='Perfect Prediction')
+    
+    plt.xlabel('True Values')
+    plt.ylabel('Predictions')
+    plt.title(title)
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    
+    # 使用 plt.tight_layout() 确保布局紧凑
+    plt.tight_layout()
+    
+    return plt.gcf()
