@@ -72,6 +72,9 @@ def train_complete_pipeline():
         config.num_layers,
     )
     model_time = time.time() - model_start_time
+    model = model.to(DEVICE)
+    model.apply(lambda x: x.to(DEVICE))  # 强制所有子模块移动到设备
+    print(f"模型参数所在设备: {next(model.parameters()).device}")  # 确认模型参数设备
     param_count = sum(p.numel() for p in model.parameters())
     print(f"模型创建完成 ({model_time:.3f}s)")
     print(f"模型参数数量: {param_count:,}")
