@@ -177,12 +177,11 @@ src/serializer/**/*.sln.docstates
 data/serialized/
 
 # Experiment outputs
-runs/
-outputs/
 results/
-logs/
+tensorboard_logs/
 checkpoints/
 models/
+experiment_logs/
 # Jupyter/IPython
 .ipynb_checkpoints/
 # VSCode settings (if not already ignored)
